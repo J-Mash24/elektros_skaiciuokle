@@ -1072,6 +1072,142 @@ with tab_data:
         "yra stulpeliai 'Statistical Period' ir 'PV Yield (kWh)'."
     )
 
+    # ========================================================
+    # PV FAILŲ PERŽIŪRA
+    # ========================================================
+
+    if pv_files:
+
+        view_mode = st.radio(
+            "Excel failų peržiūra",
+            [
+                "Failai atskirai",
+                "Sujungti PV duomenys"
+            ],
+            horizontal=True
+        )
+
+        # ----------------------------------------------------
+        # 1. Kiekvienas Excel failas rodomas atskirai
+        # ----------------------------------------------------
+
+        if view_mode == "Failai atskirai":
+
+            st.write(
+                f"Įkelta failų: {len(pv_files)}"
+            )
+
+            for file_index, uploaded_file in enumerate(pv_files):
+
+                with st.expander(
+                    f"{file_index + 1}. {uploaded_file.name}",
+                    expanded=False
+                ):
+
+                    try:
+
+                        # Grąžiname failo žymeklį į pradžią
+                        uploaded_file.seek(0)
+
+                        # Perskaitome visą Excel failą
+                        full_excel = pd.read_excel(
+                            uploaded_file,
+                            sheet_name="Sheet1",
+                            header=1
+                        )
+
+                        st.write(
+                            f"Eilučių: {len(full_excel)} | "
+                            f"Stulpelių: {len(full_excel.columns)}"
+                        )
+
+                        st.write(
+                            "Stulpeliai:",
+                            list(full_excel.columns)
+                        )
+
+                        st.dataframe(
+                            full_excel,
+                            use_container_width=True,
+                            height=550
+                        )
+
+                    except Exception as exc:
+
+                        st.error(
+                            f"Nepavyko perskaityti failo "
+                            f"{uploaded_file.name}: {exc}"
+                        )
+
+        # ----------------------------------------------------
+        # 2. Visi failai sujungiami į vieną PV lentelę
+        # ----------------------------------------------------
+
+        else:
+
+            try:
+
+                # Grąžiname visus failus į pradžią
+                for uploaded_file in pv_files:
+                    uploaded_file.seek(0)
+
+                pv_daily = read_reference_pv_files(
+                    pv_files,
+                    reference_pv_kw
+                )
+
+                reference_generation = (
+                    pv_daily["pv_ref_kwh"].sum()
+                )
+
+                specific_yield = (
+                    reference_generation
+                    / reference_pv_kw
+                )
+
+                col1, col2, col3 = st.columns(3)
+
+                col1.metric(
+                    "Referencinė PV galia",
+                    f"{reference_pv_kw:.2f} kW"
+                )
+
+                col2.metric(
+                    "Metinė referencinė generacija",
+                    f"{reference_generation / 1000:.2f} MWh"
+                )
+
+                col3.metric(
+                    "Specifinė generacija",
+                    f"{specific_yield:.1f} kWh/kW"
+                )
+
+                st.write(
+                    f"Sujungtų duomenų eilučių: {len(pv_daily)}"
+                )
+
+                st.dataframe(
+                    pv_daily,
+                    use_container_width=True,
+                    height=600
+                )
+
+            except Exception as exc:
+
+                st.error(
+                    f"PV duomenų klaida: {exc}"
+                )
+
+    else:
+
+        st.info(
+            "PV Excel failai dar neįkelti."
+        )
+
+    # ========================================================
+    # ELEKTROS VARTOJIMO DUOMENYS
+    # ========================================================
+
     st.subheader(
         "Elektros vartojimo duomenys"
     )
@@ -1100,155 +1236,6 @@ with tab_data:
             "Faile turi būti stulpeliai "
             "'datetime' ir 'load_kwh'."
         )
-
-    if pv_files:
-
-    try:
-
-        pv_daily = read_reference_pv_files(
-            pv_files,
-            reference_pv_kw
-        )
-
-        reference_generation = (
-            pv_daily["pv_ref_kwh"].sum()
-        )
-
-        specific_yield = (
-            reference_generation
-            / reference_pv_kw
-        )
-
-        col1, col2, col3 = st.columns(3)
-
-        col1.metric(
-            "Referencinė PV galia",
-            f"{reference_pv_kw:.2f} kW"
-        )
-
-        col2.metric(
-            "Metinė referencinė generacija",
-            f"{reference_generation / 1000:.2f} MWh"
-        )
-
-        col3.metric(
-            "Specifinė generacija",
-            f"{specific_yield:.1f} kWh/kW"
-        )
-
-        st.dataframe(
-            pv_daily,
-            use_container_width=True
-        )
-
-    except Exception as exc:
-
-        st.error(
-            f"PV duomenų klaida: {exc}"
-        )
-
-with tab_data:
-            
-    st.subheader(
-        "PV generacijos duomenys"
-    )
-
-    pv_files = st.file_uploader(
-        "Įkelkite referencinės PV elektrinės Excel failus",
-        type=["xlsx"],
-        accept_multiple_files=True
-    )
-
-    st.info(
-        "Galite įkelti kelis Excel failus. "
-        "Kiekvienas failas bus rodomas atskirai."
-    )
-
-    if pv_files:
-
-        st.markdown("### Įkelti failai")
-
-        for uploaded_file in pv_files:
-
-            with st.expander(
-                f"📄 {uploaded_file.name}",
-                expanded=False
-            ):
-
-                try:
-
-                    # Perskaitome visą Excel failą
-                    full_excel = pd.read_excel(
-                        uploaded_file,
-                        sheet_name="Sheet1",
-                        header=1
-                    )
-
-                    st.write(
-                        f"Eilučių: {len(full_excel)} | "
-                        f"Stulpelių: {len(full_excel.columns)}"
-                    )
-
-                    # Rodome VISĄ lentelę
-                    st.dataframe(
-                        full_excel,
-                        use_container_width=True,
-                        height=500
-                    )
-
-                except Exception as exc:
-
-                    st.error(
-                        f"Nepavyko perskaityti failo "
-                        f"{uploaded_file.name}: {exc}"
-            )
-
-        except Exception as exc:
-
-            st.error(
-                f"PV duomenų klaida: {exc}"
-            )
-view_mode = st.radio(
-    "Excel failų peržiūra",
-    [
-        "Failai atskirai",
-        "Sujungti PV duomenys"
-    ],
-    horizontal=True
-)
-
-if view_mode == "Failai atskirai":
-
-    for uploaded_file in pv_files:
-
-        with st.expander(
-            uploaded_file.name
-        ):
-
-            full_excel = pd.read_excel(
-                uploaded_file,
-                sheet_name="Sheet1",
-                header=1
-            )
-
-            st.dataframe(
-                full_excel,
-                use_container_width=True,
-                height=500
-            )
-
-else:
-
-    pv_daily = read_reference_pv_files(
-        pv_files,
-        reference_pv_kw
-    )
-
-    st.dataframe(
-        pv_daily,
-        use_container_width=True,
-        height=600
-    )
 
 # ============================================================
 # 10. BAZINIO PROFILIO PARUOŠIMAS
