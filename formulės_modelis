@@ -2,13 +2,13 @@
 # PV + BESS ENERGETINIO OPTIMIZAVIMO SKAIČIUOKLĖ
 # Streamlit application
 # ============================================================
-
+pip install -r requirements.txt
 import io
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
-
+streamlit run app.py
 
 # ============================================================
 # 1. PROGRAMĖLĖS KONFIGŪRACIJA
