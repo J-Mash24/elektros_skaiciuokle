@@ -1103,39 +1103,49 @@ with tab_data:
 
     if pv_files:
 
-        try:
+    try:
 
-            pv_daily = read_reference_pv_files(
-                pv_files,
-                reference_pv_kw
-            )
+        pv_daily = read_reference_pv_files(
+            pv_files,
+            reference_pv_kw
+        )
 
-            reference_generation = (
-                pv_daily["pv_ref_kwh"]
-                .sum()
-            )
+        reference_generation = (
+            pv_daily["pv_ref_kwh"].sum()
+        )
 
-            specific_yield = (
-                reference_generation
-                / reference_pv_kw
-            )
+        specific_yield = (
+            reference_generation
+            / reference_pv_kw
+        )
 
-            col1, col2, col3 = st.columns(3)
+        col1, col2, col3 = st.columns(3)
 
-            col1.metric(
-                "Referencinė PV galia",
-                f"{reference_pv_kw:.2f} kW"
-            )
+        col1.metric(
+            "Referencinė PV galia",
+            f"{reference_pv_kw:.2f} kW"
+        )
 
-            col2.metric(
-                "Metinė referencinė generacija",
-                f"{reference_generation / 1000:.2f} MWh"
-            )
+        col2.metric(
+            "Metinė referencinė generacija",
+            f"{reference_generation / 1000:.2f} MWh"
+        )
 
-            col3.metric(
-                "Specifinė generacija",
-                f"{specific_yield:.1f} kWh/kW"
-            )
+        col3.metric(
+            "Specifinė generacija",
+            f"{specific_yield:.1f} kWh/kW"
+        )
+
+        st.dataframe(
+            pv_daily,
+            use_container_width=True
+        )
+
+    except Exception as exc:
+
+        st.error(
+            f"PV duomenų klaida: {exc}"
+        )
 
 with tab_data:
             
