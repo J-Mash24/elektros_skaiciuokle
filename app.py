@@ -1139,7 +1139,7 @@ with tab_data:
 
             st.dataframe(
                 with tab_data:
-
+            )
     st.subheader(
         "PV generacijos duomenys"
     )
