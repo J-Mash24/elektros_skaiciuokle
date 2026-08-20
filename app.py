@@ -1137,8 +1137,7 @@ with tab_data:
                 f"{specific_yield:.1f} kWh/kW"
             )
 
-            st.dataframe
-                with tab_data:
+with tab_data:
             
     st.subheader(
         "PV generacijos duomenys"
