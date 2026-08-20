@@ -14,7 +14,6 @@ import streamlit as st
 
 st.set_page_config(
     page_title="PV + BESS skaičiuoklė",
-    page_icon="⚡",
     layout="wide"
 )
 
@@ -1139,8 +1138,60 @@ with tab_data:
             )
 
             st.dataframe(
-                pv_daily.head(20),
-                use_container_width=True
+                with tab_data:
+
+    st.subheader(
+        "PV generacijos duomenys"
+    )
+
+    pv_files = st.file_uploader(
+        "Įkelkite referencinės PV elektrinės Excel failus",
+        type=["xlsx"],
+        accept_multiple_files=True
+    )
+
+    st.info(
+        "Galite įkelti kelis Excel failus. "
+        "Kiekvienas failas bus rodomas atskirai."
+    )
+
+    if pv_files:
+
+        st.markdown("### Įkelti failai")
+
+        for uploaded_file in pv_files:
+
+            with st.expander(
+                f"📄 {uploaded_file.name}",
+                expanded=False
+            ):
+
+                try:
+
+                    # Perskaitome visą Excel failą
+                    full_excel = pd.read_excel(
+                        uploaded_file,
+                        sheet_name="Sheet1",
+                        header=1
+                    )
+
+                    st.write(
+                        f"Eilučių: {len(full_excel)} | "
+                        f"Stulpelių: {len(full_excel.columns)}"
+                    )
+
+                    # Rodome VISĄ lentelę
+                    st.dataframe(
+                        full_excel,
+                        use_container_width=True,
+                        height=500
+                    )
+
+                except Exception as exc:
+
+                    st.error(
+                        f"Nepavyko perskaityti failo "
+                        f"{uploaded_file.name}: {exc}"
             )
 
         except Exception as exc:
@@ -1148,7 +1199,47 @@ with tab_data:
             st.error(
                 f"PV duomenų klaida: {exc}"
             )
+view_mode = st.radio(
+    "Excel failų peržiūra",
+    [
+        "Failai atskirai",
+        "Sujungti PV duomenys"
+    ],
+    horizontal=True
+)
 
+if view_mode == "Failai atskirai":
+
+    for uploaded_file in pv_files:
+
+        with st.expander(
+            uploaded_file.name
+        ):
+
+            full_excel = pd.read_excel(
+                uploaded_file,
+                sheet_name="Sheet1",
+                header=1
+            )
+
+            st.dataframe(
+                full_excel,
+                use_container_width=True,
+                height=500
+            )
+
+else:
+
+    pv_daily = read_reference_pv_files(
+        pv_files,
+        reference_pv_kw
+    )
+
+    st.dataframe(
+        pv_daily,
+        use_container_width=True,
+        height=600
+    )
 
 # ============================================================
 # 10. BAZINIO PROFILIO PARUOŠIMAS
