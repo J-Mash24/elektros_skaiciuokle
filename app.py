@@ -131,14 +131,9 @@ def read_reference_pv_files(
 
         if matching_df is None:
 
-            raise ValueError(
-                f"Faile '{uploaded_file.name}' nepavyko rasti PV generacijos "
-                "lapo su stulpeliais 'Statistical Period' ir 'PV Yield (kWh)'. "
-                f"Rasti lapai: {excel.sheet_names}. "
-                "Jei tai ESO vartojimo arba NPS / sąskaitos failas, kelkite jį "
-                "į atitinkamą 'Elektros vartojimo duomenys' arba "
-                "'Elektros kainų / sąskaitos duomenys' lauką."
-            )
+
+    # Failas nėra PV generacijos failas – praleidžiame
+        continue
 
         temp = matching_df[
             [
@@ -157,11 +152,14 @@ def read_reference_pv_files(
 
         frames.append(temp)
 
-    if len(frames) == 0:
+        if len(frames) == 0:
 
-        raise ValueError(
-            "Nepavyko perskaityti nė vieno PV failo."
-        )
+    raise ValueError(
+        "Tarp įkeltų failų nerasta nė vieno tinkamo "
+        "PV generacijos failo. "
+        "PV failuose turi būti stulpeliai "
+        "'Statistical Period' ir 'PV Yield (kWh)'."
+    )
 
     pv = pd.concat(
         frames,
