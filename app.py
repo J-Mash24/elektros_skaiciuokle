@@ -5,7 +5,6 @@
 import io
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import streamlit as st
 
 # ============================================================
@@ -133,10 +132,12 @@ def read_reference_pv_files(
         if matching_df is None:
 
             raise ValueError(
-                f"Faile '{uploaded_file.name}' nepavyko rasti "
-                "lapo su stulpeliais "
-                "'Statistical Period' ir 'PV Yield (kWh)'. "
-                f"Rasti lapai: {excel.sheet_names}"
+                f"Faile '{uploaded_file.name}' nepavyko rasti PV generacijos "
+                "lapo su stulpeliais 'Statistical Period' ir 'PV Yield (kWh)'. "
+                f"Rasti lapai: {excel.sheet_names}. "
+                "Jei tai ESO vartojimo arba NPS / sąskaitos failas, kelkite jį "
+                "į atitinkamą 'Elektros vartojimo duomenys' arba "
+                "'Elektros kainų / sąskaitos duomenys' lauką."
             )
 
         temp = matching_df[
@@ -298,6 +299,27 @@ def map_pv_profile_to_load_dates(
         result["pv_per_kw"]
         .fillna(0)
     )
+
+    # Referencinis PV profilis yra valandinis (kWh per 1 val.).
+    # Jei faktinis vartojimas yra 15 ar 30 min., PV energiją
+    # proporcingai perskaičiuojame į to paties intervalo energiją.
+    load_diffs = (
+        load["datetime"]
+        .sort_values()
+        .diff()
+        .dropna()
+    )
+
+    if len(load_diffs) > 0:
+        load_dt_hours = load_diffs.median().total_seconds() / 3600
+    else:
+        load_dt_hours = 1.0
+
+    if load_dt_hours > 0:
+        result["pv_per_kw"] = (
+            result["pv_per_kw"]
+            * load_dt_hours
+        )
 
     return result[
         [
@@ -582,6 +604,197 @@ def read_actual_load(
     ).reset_index(drop=True)
 
     return result
+
+
+# ============================================================
+# ELEKTROS KAINŲ / SĄSKAITOS DUOMENŲ FUNKCIJOS
+# ============================================================
+
+def _clean_column_name(value):
+    """Suvienodina Excel stulpelių pavadinimus."""
+    return " ".join(str(value).replace("\n", " ").split()).strip()
+
+
+def _find_header_row(uploaded_file, sheet_name, required_terms, max_rows=40):
+    """
+    Randa lentelės antraštės eilutę Excel lape.
+    Naudinga sąskaitų failams, kuriuose lentelė prasideda ne 1 eilutėje.
+    """
+    uploaded_file.seek(0)
+    raw = pd.read_excel(
+        uploaded_file,
+        sheet_name=sheet_name,
+        header=None,
+        nrows=max_rows
+    )
+
+    required_terms = [term.lower() for term in required_terms]
+
+    for idx, row in raw.iterrows():
+        cells = [_clean_column_name(v).lower() for v in row.tolist()]
+        joined = " | ".join(cells)
+        if all(term in joined for term in required_terms):
+            return int(idx)
+
+    return None
+
+
+def read_market_price_file(uploaded_file, sheet_name=None):
+    """
+    Perskaito NPS / sąskaitos 15 min. arba kitokio intervalo duomenis.
+
+    Tikimasi rasti bent:
+    - Laikotarpis
+    - Automatizuoti NPS LT, Eur/kWh
+
+    Papildomai, jei yra, perskaitoma:
+    - Suvartojimas, kWh
+    - Priskaičiuota už el. energiją, Eur
+    """
+    uploaded_file.seek(0)
+    excel = pd.ExcelFile(uploaded_file)
+
+    candidate_sheets = [sheet_name] if sheet_name else excel.sheet_names
+    selected_sheet = None
+    header_row = None
+
+    for sheet in candidate_sheets:
+        if sheet is None:
+            continue
+        row = _find_header_row(
+            uploaded_file,
+            sheet,
+            required_terms=["laikotarpis", "nps"]
+        )
+        if row is not None:
+            selected_sheet = sheet
+            header_row = row
+            break
+
+    if selected_sheet is None:
+        raise ValueError(
+            "Nepavyko rasti lapo su 'Laikotarpis' ir NPS kainos stulpeliu. "
+            f"Rasti lapai: {excel.sheet_names}"
+        )
+
+    uploaded_file.seek(0)
+    df = pd.read_excel(
+        uploaded_file,
+        sheet_name=selected_sheet,
+        header=header_row
+    )
+
+    df.columns = [_clean_column_name(c) for c in df.columns]
+
+    period_col = next(
+        (c for c in df.columns if c.lower() == "laikotarpis"),
+        None
+    )
+    price_col = next(
+        (
+            c for c in df.columns
+            if "nps" in c.lower()
+            and ("eur/kwh" in c.lower() or "eur / kwh" in c.lower())
+        ),
+        None
+    )
+    load_col = next(
+        (c for c in df.columns if "suvartojimas" in c.lower() and "kwh" in c.lower()),
+        None
+    )
+    charge_col = next(
+        (c for c in df.columns if "priskai" in c.lower() and "energ" in c.lower() and "eur" in c.lower()),
+        None
+    )
+
+    if period_col is None or price_col is None:
+        raise ValueError(
+            "Nerasti būtini kainų duomenų stulpeliai. "
+            f"Rasti stulpeliai: {list(df.columns)}"
+        )
+
+    out = pd.DataFrame()
+
+    period_text = df[period_col].astype(str).str.strip()
+    start_text = period_text.str.extract(r"^\s*(.*?)\s+-\s+", expand=False)
+    start_text = start_text.fillna(period_text)
+
+    out["datetime"] = pd.to_datetime(
+        start_text,
+        errors="coerce"
+    )
+
+    out["buy_price_eur_kwh"] = pd.to_numeric(
+        df[price_col],
+        errors="coerce"
+    )
+
+    if load_col is not None:
+        out["billed_load_kwh"] = pd.to_numeric(
+            df[load_col],
+            errors="coerce"
+        )
+
+    if charge_col is not None:
+        out["energy_charge_eur"] = pd.to_numeric(
+            df[charge_col],
+            errors="coerce"
+        )
+
+    out = out.dropna(
+        subset=["datetime", "buy_price_eur_kwh"]
+    )
+
+    # Išlaikome vietinį laiką, jei Excel reikšmė turi timezone.
+    if out["datetime"].dt.tz is not None:
+        out["datetime"] = out["datetime"].dt.tz_localize(None)
+
+    out = out.sort_values("datetime").reset_index(drop=True)
+
+    return out, selected_sheet
+
+
+def align_price_to_base(base_df, price_df, fallback_price=0.15):
+    """
+    Priderina kainų intervalą prie energetinio modelio intervalo.
+    Jei kainos trūksta, naudojama vartotojo nurodyta pakaitinė kaina.
+    """
+    result = base_df.copy()
+
+    if price_df is None or len(price_df) == 0:
+        result["buy_price_eur_kwh"] = float(fallback_price)
+        return result, 0.0
+
+    model_dt = detect_timestep_hours(result)
+    price_dt = detect_timestep_hours(price_df)
+
+    # Kainas agreguojame iki modelio intervalo, jei jos smulkesnės.
+    if model_dt >= 1:
+        freq = f"{int(round(model_dt * 60))}min"
+    else:
+        freq = f"{max(1, int(round(model_dt * 60)))}min"
+
+    prices = price_df[["datetime", "buy_price_eur_kwh"]].copy()
+    prices["period"] = prices["datetime"].dt.floor(freq)
+    prices = (
+        prices.groupby("period", as_index=False)["buy_price_eur_kwh"]
+        .mean()
+        .rename(columns={"period": "price_period"})
+    )
+
+    result["price_period"] = result["datetime"].dt.floor(freq)
+    result = result.merge(
+        prices,
+        left_on="price_period",
+        right_on="price_period",
+        how="left"
+    )
+
+    coverage = float(result["buy_price_eur_kwh"].notna().mean() * 100)
+    result["buy_price_eur_kwh"] = result["buy_price_eur_kwh"].fillna(float(fallback_price))
+    result = result.drop(columns=["price_period"])
+
+    return result, coverage
 
 # ============================================================
 # 3. BESS SIMULIAVIMO FUNKCIJA
@@ -1002,6 +1215,21 @@ def run_scenario(
 
         bess_duration_h = 0.0
 
+    # Jei baziniame profilyje yra intervalinės elektros kainos,
+    # apskaičiuojame faktines importo ir bazinio vartojimo sąnaudas.
+    if "buy_price_eur_kwh" in result.columns:
+        actual_grid_cost_eur = (
+            result["grid_import_kwh"]
+            * result["buy_price_eur_kwh"]
+        ).sum()
+        baseline_energy_cost_eur = (
+            result["load_kwh"]
+            * result["buy_price_eur_kwh"]
+        ).sum()
+    else:
+        actual_grid_cost_eur = np.nan
+        baseline_energy_cost_eur = np.nan
+
     summary = {
         "pv_kw":
             pv_kw,
@@ -1046,7 +1274,13 @@ def run_scenario(
             self_consumption * 100,
 
         "equivalent_cycles":
-            equivalent_cycles
+            equivalent_cycles,
+
+        "actual_grid_cost_eur":
+            actual_grid_cost_eur,
+
+        "baseline_energy_cost_eur":
+            baseline_energy_cost_eur
     }
 
     return summary, result
@@ -1091,10 +1325,18 @@ def add_economics(
         df["bess_capex_eur"]
     )
 
-    df["grid_cost_eur"] = (
-        df["grid_import_kwh"]
-        * electricity_buy_price
-    )
+    if (
+        "actual_grid_cost_eur" in df.columns
+        and df["actual_grid_cost_eur"].notna().any()
+    ):
+        df["grid_cost_eur"] = df["actual_grid_cost_eur"].fillna(
+            df["grid_import_kwh"] * electricity_buy_price
+        )
+    else:
+        df["grid_cost_eur"] = (
+            df["grid_import_kwh"]
+            * electricity_buy_price
+        )
 
     df["export_revenue_eur"] = (
         df["export_kwh"]
@@ -1117,10 +1359,18 @@ def add_economics(
         df["export_revenue_eur"]
     )
 
-    base_annual_cost = (
-        annual_load_kwh
-        * electricity_buy_price
-    )
+    if (
+        "baseline_energy_cost_eur" in df.columns
+        and df["baseline_energy_cost_eur"].notna().any()
+    ):
+        base_annual_cost = float(
+            df["baseline_energy_cost_eur"].dropna().iloc[0]
+        )
+    else:
+        base_annual_cost = (
+            annual_load_kwh
+            * electricity_buy_price
+        )
 
     df["annual_savings_eur"] = (
         base_annual_cost
@@ -1558,6 +1808,83 @@ with tab_data:
                     use_container_width=True,
                     height=450
                 )
+
+
+    # ========================================================
+    # ELEKTROS KAINŲ / SĄSKAITOS DUOMENYS
+    # ========================================================
+
+    st.subheader(
+        "Elektros kainų / sąskaitos duomenys"
+    )
+
+    price_source = st.radio(
+        "Elektros pirkimo kainos šaltinis",
+        [
+            "Fiksuota kaina",
+            "Faktinės NPS kainos"
+        ],
+        horizontal=True
+    )
+
+    price_file = None
+    price_sheet = None
+    price_preview = None
+
+    price_fallback = st.number_input(
+        "Pakaitinė pirkimo kaina, kai faktinės kainos nėra, €/kWh",
+        min_value=0.0,
+        value=0.15,
+        format="%.4f"
+    )
+
+    if price_source == "Faktinės NPS kainos":
+
+        price_file = st.file_uploader(
+            "Įkelkite NPS / elektros sąskaitos Excel failą",
+            type=["xlsx"],
+            key="market_price_file"
+        )
+
+        st.info(
+            "Programa ieškos lentelės su stulpeliais 'Laikotarpis' ir "
+            "'Automatizuoti NPS LT, Eur/kWh'. Failas gali turėti informacines "
+            "eilutes virš lentelės."
+        )
+
+        if price_file is not None:
+
+            price_file.seek(0)
+            price_excel = pd.ExcelFile(price_file)
+
+            price_sheet = st.selectbox(
+                "Pasirinkite kainų / sąskaitos Excel lapą",
+                price_excel.sheet_names,
+                key="price_sheet_selector"
+            )
+
+            try:
+                parsed_price_preview, detected_price_sheet = read_market_price_file(
+                    price_file,
+                    sheet_name=price_sheet
+                )
+
+                st.caption(
+                    f"Atpažintas lapas: {detected_price_sheet} | "
+                    f"Įrašų: {len(parsed_price_preview)}"
+                )
+
+                st.dataframe(
+                    parsed_price_preview,
+                    use_container_width=True,
+                    height=400
+                )
+
+            except Exception as exc:
+                st.error(
+                    f"Nepavyko perskaityti kainų / sąskaitos duomenų: {exc}"
+                )
+
 # ============================================================
 # 10. BAZINIO PROFILIO PARUOŠIMAS
 # ============================================================
@@ -1571,6 +1898,8 @@ first_timestamp = None
 last_timestamp = None
 dt_hours = None
 peak_load_kw = None
+price_df = None
+price_coverage_pct = None
 
 if pv_files:
 
@@ -1620,6 +1949,30 @@ if pv_files:
                     hourly_pv,
                     load_df
                 )
+
+        # ----------------------------------------------------
+        # ELEKTROS KAINŲ PRISKYRIMAS
+        # ----------------------------------------------------
+
+        if base_hourly is not None and len(base_hourly) > 0:
+
+            if (
+                price_source == "Faktinės NPS kainos"
+                and price_file is not None
+            ):
+                price_df, _ = read_market_price_file(
+                    price_file,
+                    sheet_name=price_sheet
+                )
+
+                base_hourly, price_coverage_pct = align_price_to_base(
+                    base_hourly,
+                    price_df,
+                    fallback_price=price_fallback
+                )
+            else:
+                base_hourly["buy_price_eur_kwh"] = float(price_fallback)
+                price_coverage_pct = 100.0 if price_source == "Fiksuota kaina" else 0.0
 
         # ----------------------------------------------------
         # DUOMENŲ PATIKRA
@@ -1908,8 +2261,12 @@ with tab_optimization:
 
             buy_price = st.number_input(
                 "Elektros pirkimo kaina, €/kWh",
-                value=0.15,
-                format="%.3f"
+                value=float(price_fallback),
+                format="%.4f",
+                help=(
+                    "Naudojama kaip fiksuota kaina arba kaip pakaitinė kaina "
+                    "intervalams, kuriems nėra faktinės NPS kainos."
+                )
             )
 
             sell_price = st.number_input(
@@ -2141,6 +2498,12 @@ with tab_results:
                 "–",
                 last_timestamp
             )
+
+            if price_coverage_pct is not None:
+                st.metric(
+                    "Faktinių kainų padengimas",
+                    f"{price_coverage_pct:.1f} %"
+                )
 
         # ----------------------------------------------------
         # MĖNESINIAI REZULTATAI
@@ -2446,6 +2809,11 @@ else:
     st.sidebar.warning(
         "Vartojimas: neįkeltas"
     )
+
+if price_source == "Faktinės NPS kainos" and price_file is not None:
+    st.sidebar.success("Elektros kaina: faktinės NPS kainos")
+else:
+    st.sidebar.warning("Elektros kaina: fiksuota / pakaitinė")
 
 st.sidebar.info(
     "Ekonominės prielaidos šiuo metu "
