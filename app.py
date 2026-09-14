@@ -130,10 +130,8 @@ def read_reference_pv_files(
                 break
 
         if matching_df is None:
-
-
-    # Failas nėra PV generacijos failas – praleidžiame
-        continue
+            # Failas nėra PV generacijos failas – praleidžiame
+            continue
 
         temp = matching_df[
             [
@@ -152,14 +150,14 @@ def read_reference_pv_files(
 
         frames.append(temp)
 
-        if len(frames) == 0:
-
-    raise ValueError(
-        "Tarp įkeltų failų nerasta nė vieno tinkamo "
-        "PV generacijos failo. "
-        "PV failuose turi būti stulpeliai "
-        "'Statistical Period' ir 'PV Yield (kWh)'."
-    )
+    if len(frames) == 0:
+        raise ValueError(
+            "Tarp įkeltų failų nerasta nė vieno tinkamo "
+            "PV generacijos failo. "
+            "PV failuose turi būti stulpeliai "
+            "'Statistical Period' ir 'PV Yield (kWh)'. "
+            "ESO vartojimo ar sąskaitos failus kelkite į jiems skirtus laukus."
+        )
 
     pv = pd.concat(
         frames,
@@ -1564,8 +1562,10 @@ with tab_data:
     )
 
     st.info(
-        "Tikimasi Excel failų, kuriuose antroje eilutėje "
-        "yra stulpeliai 'Statistical Period' ir 'PV Yield (kWh)'."
+        "Čia kelkite tik referencinės PV elektrinės generacijos failus. "
+        "Programa ieško stulpelių 'Statistical Period' ir 'PV Yield (kWh)'. "
+        "ESO vartojimo failus kelkite į 'Elektros vartojimo duomenys', "
+        "o sąskaitos / NPS failus – į 'Elektros kainų / sąskaitos duomenys'."
     )
 
     # ========================================================
@@ -2004,6 +2004,12 @@ if pv_files:
                 load_df["load_kwh"].max()
                 / dt_hours
             )
+
+    except ValueError as exc:
+
+        st.warning(
+            str(exc)
+        )
 
     except Exception as exc:
 
