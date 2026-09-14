@@ -212,48 +212,6 @@ def create_synthetic_load(
     Sukuria sintetinį valandinį vartojimo profilį.
     """
 
-    hour_factors = {
-        0: 0.60,
-        1: 0.55,
-        2: 0.55,
-        3: 0.55,
-        4: 0.55,
-        5: 0.60,
-        6: 0.70,
-        7: 0.85,
-        8: 1.00,
-        9: 1.10,
-        10: 1.15,
-        11: 1.20,
-        12: 1.20,
-        13: 1.15,
-        14: 1.10,
-        15: 1.05,
-        16: 1.00,
-        17: 0.95,
-        18: 0.90,
-        19: 0.85,
-        20: 0.80,
-        21: 0.75,
-        22: 0.70,
-        23: 0.65
-    }
-
-    month_factors = {
-        1: 1.10,
-        2: 1.08,
-        3: 1.03,
-        4: 0.98,
-        5: 0.95,
-        6: 0.93,
-        7: 0.93,
-        8: 0.95,
-        9: 0.98,
-        10: 1.02,
-        11: 1.06,
-        12: 1.10
-    }
-
     df = pd.DataFrame(
         {
             "datetime":
@@ -261,117 +219,126 @@ def create_synthetic_load(
         }
     )
 
-    df["hour"] = (
-        df["datetime"].dt.hour
-    )
-
-    df["weekday"] = (
-        df["datetime"].dt.weekday
-    )
-
-    df["month"] = (
-        df["datetime"].dt.month
-    )
-
-    df["hour_factor"] = (
-        df["hour"]
-        .map(hour_factors)
-    )
-
-    # Darbo dienos = 1, savaitgaliai = 0.75
-    df["day_factor"] = np.where(
-        df["weekday"] < 5,
-        1.0,
-        0.75
-    )
-
-    df["month_factor"] = (
-        df["month"]
-        .map(month_factors)
-    )
-
-    df["raw_factor"] = (
-        df["hour_factor"]
-        * df["day_factor"]
-        * df["month_factor"]
-    )
-
-    df["load_kwh"] = (
-        df["raw_factor"]
-        / df["raw_factor"].sum()
-        * annual_load_kwh
-    )
-
-    return df[
-        [
-            "datetime",
-            "load_kwh"
-        ]
-    ]
-
 
 def read_actual_load(
-    uploaded_file
+    uploaded_file,
+    sheet_name=None
 ):
-    """
-    Faktinio vartojimo failas turi turėti:
-    datetime
-    load_kwh
-    """
 
+    uploaded_file.seek(0)
+
+    # CSV
     if uploaded_file.name.lower().endswith(".csv"):
 
         df = pd.read_csv(
             uploaded_file
         )
 
+    # Excel
     else:
 
-        df = pd.read_excel(
+        excel = pd.ExcelFile(
             uploaded_file
         )
 
-    required = [
+        # Jei lapas nenurodytas, naudojame pirmą
+        if sheet_name is None:
+            sheet_name = excel.sheet_names[0]
+
+        uploaded_file.seek(0)
+
+        df = pd.read_excel(
+            uploaded_file,
+            sheet_name=sheet_name
+        )
+
+    # ------------------------------------------------
+    # Bandome atpažinti datos stulpelį
+    # ------------------------------------------------
+
+    datetime_candidates = [
+        "datetime",
+        "Data, valanda",
+        "Data",
+        "Laikotarpis"
+    ]
+
+    datetime_col = None
+
+    for col in datetime_candidates:
+
+        if col in df.columns:
+
+            datetime_col = col
+
+            break
+
+    if datetime_col is None:
+
+        raise ValueError(
+            "Nepavyko rasti datos / laiko stulpelio."
+        )
+
+    # ------------------------------------------------
+    # Bandome atpažinti vartojimo stulpelį
+    # ------------------------------------------------
+
+    load_candidates = [
+        "load_kwh",
+        "Kiekis, kWh",
+        "Suvartojimas, kWh"
+    ]
+
+    load_col = None
+
+    for col in load_candidates:
+
+        if col in df.columns:
+
+            load_col = col
+
+            break
+
+    if load_col is None:
+
+        raise ValueError(
+            "Nepavyko rasti suvartojimo stulpelio."
+        )
+
+    result = df[
+        [
+            datetime_col,
+            load_col
+        ]
+    ].copy()
+
+    result.columns = [
         "datetime",
         "load_kwh"
     ]
 
-    missing = [
-        col
-        for col in required
-        if col not in df.columns
-    ]
-
-    if missing:
-        raise ValueError(
-            "Vartojimo faile turi būti stulpeliai: "
-            "'datetime' ir 'load_kwh'."
-        )
-
-    df["datetime"] = pd.to_datetime(
-        df["datetime"],
+    result["datetime"] = pd.to_datetime(
+        result["datetime"],
         errors="coerce"
     )
 
-    df["load_kwh"] = pd.to_numeric(
-        df["load_kwh"],
+    result["load_kwh"] = pd.to_numeric(
+        result["load_kwh"],
         errors="coerce"
     )
 
-    df = df.dropna(
+    result = result.dropna(
         subset=[
             "datetime",
             "load_kwh"
         ]
     )
 
-    return df[
-        [
-            "datetime",
-            "load_kwh"
-        ]
-    ]
+    result = result.sort_values(
+        "datetime"
+    ).reset_index(drop=True)
 
+    return result
 
 # ============================================================
 # 3. BESS SIMULIAVIMO FUNKCIJA
@@ -1222,20 +1189,53 @@ with tab_data:
 
     load_file = None
 
-    if load_source == "Faktinis profilis":
+    load_file = None
+load_sheet = None
 
-        load_file = st.file_uploader(
-            "Įkelkite vartojimo CSV arba Excel failą",
-            type=[
-                "csv",
-                "xlsx"
-            ]
-        )
+if load_source == "Faktinis profilis":
 
-        st.info(
-            "Faile turi būti stulpeliai "
-            "'datetime' ir 'load_kwh'."
-        )
+    load_file = st.file_uploader(
+        "Įkelkite faktinio vartojimo CSV arba Excel failą",
+        type=[
+            "csv",
+            "xlsx"
+        ],
+        key="load_file"
+    )
+
+    if load_file is not None:
+
+        if load_file.name.lower().endswith(".xlsx"):
+
+            load_file.seek(0)
+
+            excel = pd.ExcelFile(
+                load_file
+            )
+
+            load_sheet = st.selectbox(
+                "Pasirinkite vartojimo duomenų lapą",
+                excel.sheet_names,
+                key="load_sheet"
+            )
+
+            st.write(
+                "Aptikti Excel lapai:",
+                excel.sheet_names
+            )
+
+            load_file.seek(0)
+
+            preview = pd.read_excel(
+                load_file,
+                sheet_name=load_sheet
+            )
+
+            st.dataframe(
+                preview,
+                use_container_width=True,
+                height=450
+            )
 
 # ============================================================
 # 10. BAZINIO PROFILIO PARUOŠIMAS
@@ -1259,22 +1259,23 @@ if pv_files:
 
         if load_source == "Modeliuotas profilis":
 
-            load_df = create_synthetic_load(
-                hourly_pv["datetime"],
-                annual_load_kwh
-            )
+    load_df = create_synthetic_load(
+        hourly_pv["datetime"],
+        annual_load_kwh
+    )
 
-        else:
+else:
 
-            if load_file is not None:
+    if load_file is not None:
 
-                load_df = read_actual_load(
-                    load_file
-                )
+        load_df = read_actual_load(
+            load_file,
+            sheet_name=load_sheet
+        )
 
-            else:
+    else:
 
-                load_df = None
+        load_df = None
 
         if load_df is not None:
 
