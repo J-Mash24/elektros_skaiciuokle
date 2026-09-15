@@ -1,0 +1,51 @@
+PV+BESS MODELIO V4 PATIKROS ATASKAITA
+=====================================
+
+FAKTINIAI DUOMENYS
+- ESO aktyvioji P+ faktinė energija: 892,895.84 kWh
+- Laikotarpis: 2025-09-01 00:00:00 – 2026-08-31 23:00:00
+- Valandinių įrašų: 8,756
+- Referencinė PV generacija (21.12 kW): 19,103.29 kWh
+- Specifinė PV generacija: 904.51 kWh/kW/metus
+- 730 kW modeliuojama PV generacija: 660,293.64 kWh/metus
+
+SEZONINIAI DYDŽIO ORIENTYRAI (730 kW PV)
+- Vasaros nakties poreikis: vid. 407.07 kWh; P90 901.49 kWh; P95 1,280.28 kWh; max 1,954.81 kWh
+- Vasaros nominalus BESS orientyras (P90 / 15 % rezervas, 5-95 % SOC, 95 % eta_d): 1,054.37 kWh
+- Vasaros dieninio poreikio tiesioginis PV padengimas: 83.44 %
+- Vasaros dienos, kai PV pertekliaus pakanka tos dienos nakties poreikiui: 85.98 %
+- Žiemos dienos poreikis: vid. 1,865.67 kWh; P90 2,815.83 kWh; max 3,179.46 kWh
+- Žiemos techninis BESS orientyras (P90): 3,293.37 kWh
+- Žiemos tiesioginis PV poreikio padengimas: 7.82 %
+- Faktinio žiemos kainų arbitražo dydis: nenustatytas, nes pateikti NPS duomenys apima tik 2026-08.
+
+24 H AUTONOMIJA (konservatyviai, be PV indėlio)
+- 24 h poreikio P90: 6,521.21 kWh
+- 24 h poreikio maksimumas: 7,752.15 kWh
+- Nominalus BESS P90 24 h autonomijai: 7,627.15 kWh
+- Nominalus BESS maksimaliam 24 h poreikiui: 9,066.84 kWh
+
+BANDOMASIS SCENARIJUS: PV 730 kW + BESS 1,100 kWh / 500 kW
+- Metinis vartojimas: 892,895.84 kWh
+- PV generacija: 660,177.98 kWh
+- Importas iš tinklo: 640,557.83 kWh
+- Eksportas: 397,975.44 kWh
+- BESS iškrovimas: 82,219.12 kWh
+- Iš tinklo į BESS įkrauta: 0.00 kWh
+- Atsinaujinančios energijos savarankiškumas: 28.26 %
+- PV savivartojimas: 39.72 %
+- Nepatenkintas poreikis: 0.000000 kWh
+
+ENERGIJOS BALANSO QA
+- Maks. apkrovos balanso liekana: 5.684e-14 kWh
+- Metinė apkrovos balanso liekana: -2.300e-13 kWh
+- Maks. PV balanso liekana: 5.684e-14 kWh
+- Metinė PV balanso liekana: -7.230e-13 kWh
+
+GRID CHARGING LOGIKOS TESTAS (sintetinis žiemos kainų profilis)
+- BESS iš tinklo įkrauta: 473.68 kWh
+- BESS iškrauta brangiomis valandomis: 300.00 kWh
+- Testo energijos balanso liekana: 0.000e+00 kWh
+
+PASTABA
+Faktinis grid-charging / žiemos kainų arbitražas negali būti pilnai patikrintas su pateiktais duomenimis, nes intervalinės NPS kainos pateiktos tik 2026 m. rugpjūčiui. Branduolys šią logiką įgyvendina ir ji patikrinta kontroliuojamu žiemos kainų testu.
