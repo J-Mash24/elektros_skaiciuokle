@@ -1,0 +1,31 @@
+PV + BESS MODELIO V5 PATIKRA
+
+Pagrindinis pakeitimas
+--------------------
+Modelis nebepriklauso nuo PV Excel failo. Numatytoji parinktis yra modeliuojamas sezoninis PV profilis.
+Referenciniai PV failai lieka kaip pasirenkamas alternatyvus šaltinis. Jei vartotojas pasirenka referencinių failų režimą, bet failų neįkelia, skaičiavimas automatiškai naudoja modeliuojamą PV profilį ir nėra blokuojamas.
+
+Modeliuojamo PV profilio kalibravimas
+-----------------------------------
+Metinė specifinė generacija pagal ankstesnius 21,12 kW referencinės elektrinės 2025 m. duomenis: 904,5 kWh/kW/metus.
+Mėnesinis generacijos pasiskirstymas įrašytas į energy_model_core.py kaip numatytasis kalibravimas.
+Paros profilis dinamiškai formuojamas pagal saulėtekį ir saulėlydį.
+
+Patikra su faktiniu ESO vartojimo failu
+--------------------------------------
+Laikotarpis: 2025-09-01–2026-08-31
+P+ faktinis vartojimas: 892 895,84 kWh
+Modeliuojamo 1 kW PV profilio generacija per 12 mėn.: 904,50 kWh
+730 kW PV generacija: 660 285 kWh
+Bandomasis scenarijus: PV 730 kW, BESS 1 000 kWh / 500 kW, SOC 5–95 %, efektyvumai 95 %
+Tinklo importas: 611 450,79 kWh
+Eksportas: 368 765,10 kWh
+Energetinis savarankiškumas: 31,52 %
+Nepatenkinta apkrova: 0,00 kWh
+
+Techninė patikra
+----------------
+- app.py: Python sintaksės patikra OK
+- energy_model_core.py: Python sintaksės patikra OK
+- Modelio branduolio skaičiavimo testas su faktiniu ESO vartojimu OK
+- Streamlit serverio vykdymo testas šiame konteineryje neatliktas, nes Streamlit vykdomasis failas čia neįdiegtas.
