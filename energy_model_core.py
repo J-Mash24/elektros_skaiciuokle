@@ -35,8 +35,16 @@ class ModelConfig:
     winter_months: tuple[int, ...] = (12, 1, 2)
     low_price_quantile: float = 0.25
     high_price_quantile: float = 0.75
-    degradation_cost_eur_kwh: float = 0.02
-    minimum_arbitrage_margin_eur_kwh: float = 0.00
+
+    # BESS degradacijos prielaidos.
+    # Jei degradation_cost_eur_kwh=None, degradacijos kaina apskaičiuojama
+    # automatiškai pagal energijos dalies CAPEX, ciklų skaičių ir naudojamą SOC langą.
+    bess_energy_capex_eur_kwh: float = 300.0
+    bess_cycle_life: float = 6000.0
+    degradation_cost_eur_kwh: float | None = None
+
+    # Papildoma minimali arbitražo marža virš nuostolių ir degradacijos.
+    minimum_arbitrage_margin_eur_kwh: float = 0.01
 
 
 def _season(month: int, cfg: ModelConfig) -> str:
@@ -227,17 +235,55 @@ def map_pv_to_load_dates(
     return result.sort_values("datetime").reset_index(drop=True)
 
 
+
+def calculate_degradation_cost_eur_kwh(
+    soc_min: float,
+    soc_max: float,
+    cfg: ModelConfig = ModelConfig(),
+) -> float:
+    """Apskaičiuoja BESS degradacijos kainą už iš baterijos atiduotą kWh.
+
+    Jei cfg.degradation_cost_eur_kwh nurodyta tiesiogiai, naudojama ši reikšmė.
+    Kitu atveju:
+        C_deg = CAPEX_energy / (cycle_life * usable_SOC_fraction)
+
+    Tai supaprastinta marginali ciklinės degradacijos kaina, skirta
+    arbitražo sprendimui; ji nepakeičia bendro BESS OPEX.
+    """
+    if cfg.degradation_cost_eur_kwh is not None:
+        return max(float(cfg.degradation_cost_eur_kwh), 0.0)
+
+    usable_fraction = max(float(soc_max) - float(soc_min), 1e-9)
+    cycle_life = max(float(cfg.bess_cycle_life), 1e-9)
+    capex = max(float(cfg.bess_energy_capex_eur_kwh), 0.0)
+
+    return capex / (cycle_life * usable_fraction)
+
+
 def add_price_signals(
     data: pd.DataFrame,
     charge_eff: float,
     discharge_eff: float,
     cfg: ModelConfig = ModelConfig(),
+    soc_min: float = 0.05,
+    soc_max: float = 0.95,
 ) -> pd.DataFrame:
     """Add daily cheap/expensive flags only where arbitrage is economically viable."""
     df = data.copy()
+
+    degradation_cost = calculate_degradation_cost_eur_kwh(
+        soc_min=soc_min,
+        soc_max=soc_max,
+        cfg=cfg,
+    )
+
     if "buy_price_eur_kwh" not in df.columns:
         df["price_low_threshold"] = np.nan
         df["price_high_threshold"] = np.nan
+        df["required_high_price"] = np.nan
+        df["interval_required_high_price"] = np.nan
+        df["degradation_cost_eur_kwh_used"] = degradation_cost
+        df["minimum_arbitrage_margin_eur_kwh_used"] = cfg.minimum_arbitrage_margin_eur_kwh
         df["is_cheap_price"] = False
         df["is_expensive_price"] = False
         df["arbitrage_viable"] = False
@@ -259,9 +305,14 @@ def add_price_signals(
     )
 
     rt_eff = max(charge_eff * discharge_eff, 1e-9)
+
+    daily["degradation_cost_eur_kwh_used"] = degradation_cost
+    daily["minimum_arbitrage_margin_eur_kwh_used"] = (
+        cfg.minimum_arbitrage_margin_eur_kwh
+    )
     daily["required_high_price"] = (
         daily["price_low_threshold"] / rt_eff
-        + cfg.degradation_cost_eur_kwh
+        + degradation_cost
         + cfg.minimum_arbitrage_margin_eur_kwh
     )
     daily["arbitrage_viable"] = (
@@ -270,9 +321,18 @@ def add_price_signals(
     )
 
     df = df.merge(daily, on="date", how="left")
+
+    # Intervalo lygio testas naudoja faktinę pigios valandos kainą.
+    df["interval_required_high_price"] = (
+        df["buy_price_eur_kwh"] / rt_eff
+        + degradation_cost
+        + cfg.minimum_arbitrage_margin_eur_kwh
+    )
+
     df["is_cheap_price"] = (
         df["arbitrage_viable"].fillna(False)
         & (df["buy_price_eur_kwh"] <= df["price_low_threshold"])
+        & (df["price_high_threshold"] > df["interval_required_high_price"])
     )
     df["is_expensive_price"] = (
         df["arbitrage_viable"].fillna(False)
@@ -311,7 +371,14 @@ def simulate_seasonal_bess(
             on="datetime", how="left"
         )
 
-    df = add_price_signals(df, charge_eff, discharge_eff, cfg)
+    df = add_price_signals(
+        df,
+        charge_eff,
+        discharge_eff,
+        cfg,
+        soc_min=soc_min,
+        soc_max=soc_max,
+    )
 
     min_energy = bess_kwh * soc_min
     max_energy = bess_kwh * soc_max
@@ -517,6 +584,16 @@ def summarize_scenario(result: pd.DataFrame, bess_kwh: float, bess_kw: float, so
         "equivalent_cycles": equivalent_cycles,
         "actual_grid_cost_eur": actual_grid_cost,
         "baseline_energy_cost_eur": baseline_cost,
+        "degradation_cost_eur_kwh_used": (
+            float(result["degradation_cost_eur_kwh_used"].iloc[0])
+            if "degradation_cost_eur_kwh_used" in result.columns and len(result)
+            else np.nan
+        ),
+        "minimum_arbitrage_margin_eur_kwh_used": (
+            float(result["minimum_arbitrage_margin_eur_kwh_used"].iloc[0])
+            if "minimum_arbitrage_margin_eur_kwh_used" in result.columns and len(result)
+            else np.nan
+        ),
     }
 
 
@@ -637,7 +714,14 @@ def calculate_sizing_metrics(
     price_based_winter = np.nan
     c_winter_price = np.nan
     if "buy_price_eur_kwh" in winter.columns and len(winter):
-        signaled = add_price_signals(winter, 0.95, discharge_eff, cfg)
+        signaled = add_price_signals(
+            winter,
+            0.95,
+            discharge_eff,
+            cfg,
+            soc_min=soc_min,
+            soc_max=soc_max,
+        )
         expensive = signaled[signaled["is_expensive_price"]]
         if len(expensive):
             daily_expensive = expensive.groupby(expensive["datetime"].dt.normalize())["load_kwh"].sum()
